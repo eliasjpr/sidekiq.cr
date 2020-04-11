@@ -7,7 +7,7 @@ module Sidekiq
       getter! pool : Sidekiq::Pool
       getter! logger : ::Logger
 
-      def error_handlers : Array(Sidekiq::ExceptionHandler::Base)
+      def error_handlers
         [] of Sidekiq::ExceptionHandler::Base
       end
 
@@ -142,8 +142,10 @@ module Sidekiq
 
     def raw_push(payloads)
       @ctx.pool.redis do |conn|
-        conn.multi do |multi|
-          atomic_push(multi, payloads)
+        conn.pipelined do |pipeline|
+          pipeline.command ["MULTI"]
+          atomic_push(pipeline, payloads)
+          pipeline.command ["EXEC"]
         end
       end
       true
@@ -160,7 +162,7 @@ module Sidekiq
         conn.zadd("schedule", all)
       else
         q = payloads.first.queue
-        now = Time.local
+        now = Time.utc
         to_push = payloads.map do |entry|
           entry.enqueued_at = now
           entry.to_json
